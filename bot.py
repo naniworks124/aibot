@@ -1,29 +1,29 @@
+import os
 import requests
 from telebot import TeleBot
 
-# Telegram Bot Token
-BOT_TOKEN = "YOUR_BOT_TOKEN"
+# Get the bot token and API key from environment variables
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+API_KEY = os.getenv("API_KEY")
+
+if not BOT_TOKEN or not API_KEY:
+    raise ValueError("Both BOT_TOKEN and API_KEY must be set as environment variables")
+
+# Initialize the bot with the token
 bot = TeleBot(BOT_TOKEN)
 
-# Gemini API Key
-API_KEY = "YOUR_GEMINI_API_KEY"
-API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={API_KEY}"
-
-# Define the '/start' command
-@bot.message_handler(commands=['start'])
-def start(message):
-    bot.reply_to(message, "Hello! I am your assistant bot. Ask me anything.")
-
-# Define the message handler for normal text messages
+# Send typing action
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    # Send typing action to Telegram
     bot.send_chat_action(chat_id=message.chat.id, action="typing")
 
     # Get the message text
     ms = message.text
 
-    # Prepare the API request payload for Gemini API
+    # Gemini API URL
+    API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={API_KEY}"
+
+    # Prepare API request payload
     payload = {
         "contents": [
             {"parts": [{"text": ms}]}
@@ -45,7 +45,9 @@ def handle_message(message):
     except Exception as e:
         # Handle errors
         error_message = "<b>❌ Error Occurred! Please Contact @NitinJack</b>\n"
-        bot.reply_to(message, error_message, parse_mode="HTML")
+        bot.reply_text(chat_id=message.chat.id, reply_to_message_id=message.message_id, text=error_message, parse_mode="HTML")
+
 
 # Start the bot
-bot.polling()
+if __name__ == "__main__":
+    bot.polling(none_stop=True)
