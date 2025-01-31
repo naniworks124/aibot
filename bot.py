@@ -1,48 +1,66 @@
+import telebot
+from flask import Flask, request
 import os
 import requests
-import re
-from telebot import TeleBot
 
-# Get the bot token and API key from environment variables
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-API_KEY = os.getenv("API_KEY")
+# Load Bot Token from Environment Variables
+TOKEN = os.getenv("BOT_TOKEN")  # Set in Koyeb
+bot = telebot.TeleBot(TOKEN)
 
-if not BOT_TOKEN or not API_KEY:
-    raise ValueError("Both BOT_TOKEN and API_KEY must be set as environment variables")
+# Flask App for Webhook
+app = Flask(__name__)
 
-# Initialize the bot
-bot = TeleBot(BOT_TOKEN)
+@app.route(f"/{TOKEN}", methods=["POST"])
+def receive_update():
+    """Receives Telegram updates via webhook and processes them."""
+    update = request.get_data().decode("utf-8")
+    bot.process_new_updates([telebot.types.Update.de_json(update)])
+    return "OK", 200
 
+# Function to Escape Markdown Special Characters
 def escape_markdown(text):
-    escape_chars = r'_*[]()~`>#+-=|{}.!'
-    return re.sub(f"([{re.escape(escape_chars)}])", r"\\\1", text)
+    """Escapes special characters in Markdown."""
+    special_chars = "_*[]()~`>#+-=|{}.!"
+    for char in special_chars:
+        text = text.replace(char, "\\" + char)
+    return text
 
+# Function to Send Query to Gemini API
+def ask_gemini(user_text):
+    """Sends user message to Gemini API and returns the response."""
+    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # Set this in Koyeb
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateText?key={GEMINI_API_KEY}"
+    
+    payload = {"prompt": user_text, "maxTokens": 100}
+    headers = {"Content-Type": "application/json"}
+    
+    try:
+        response = requests.post(url, json=payload, headers=headers).json()
+        return response.get("candidates", [{}])[0].get("output", "Sorry, I couldn't generate a response.")
+    
+    except Exception as e:
+        print(f"Gemini API Error: {e}")
+        return "❌ AI Error Occurred. Please try again later."
+
+# Function to Handle Messages
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    bot.send_chat_action(chat_id=message.chat.id, action="typing")
-    ms = message.text
-
-    API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={API_KEY}"
-
-    payload = {
-        "contents": [
-            {"parts": [{"text": ms}]}
-        ]
-    }
-
+    """Handles incoming messages from users."""
     try:
-        response = requests.post(API_URL, json=payload, headers={"Content-Type": "application/json"})
-        response.raise_for_status()
+        user_text = message.text.strip()
+        response = escape_markdown(ask_gemini(user_text))
+        bot.send_message(message.chat.id, response, parse_mode="MarkdownV2")
 
-        data = response.json()
-        msg = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "❌ Error: No response from Gemini.")
-
-        msg = escape_markdown(msg)  # Escape markdown before sending
-        bot.send_message(chat_id=message.chat.id, text=msg, parse_mode="MarkdownV2", reply_to_message_id=message.message_id)
+    except telebot.apihelper.ApiTelegramException as e:
+        bot.send_message(message.chat.id, "❌ Error Occurred! Please Contact Admin.")
+        print(f"Telegram API Error: {e}")
 
     except Exception as e:
-        error_message = "<b>❌ Error Occurred! Please Contact @NitinJack</b>\n"
-        bot.send_message(chat_id=message.chat.id, text=error_message, parse_mode="HTML", reply_to_message_id=message.message_id)
+        bot.send_message(message.chat.id, "❌ An unexpected error occurred.")
+        print(f"Unexpected Error: {e}")
 
+# Start Flask Web Server
 if __name__ == "__main__":
-    bot.polling(none_stop=True)
+    bot.remove_webhook()
+    bot.set_webhook(url=f"https://your-koyeb-app-url/{TOKEN}")  # Replace with your Koyeb domain
+    app.run(host="0.0.0.0", port=8000)
